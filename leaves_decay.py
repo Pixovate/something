@@ -40,12 +40,6 @@ class LeavesServer(IServer):
         self.RegisterVanillaEvent("OnScriptTickServer", self.on_script_tick)
 
     def on_script_tick(self):
-        if len(self.updateBitSet) > 100:
-            for i in range(100):
-                block = next(iter(self.updateBitSet))
-                if blockInfoComp.GetBlockNew(block[:3], block[3]).get("name") not in self.leaves:
-                    self.updateBitSet.remove(block)
-            return
         if self.updateBitSet:
             block = next(iter(self.updateBitSet))
             if blockInfoComp.GetBlockNew(block[:3], block[3]).get("name") not in self.leaves:
@@ -53,17 +47,17 @@ class LeavesServer(IServer):
 
     def on_block_remove(self, args):
         if args["fullName"] in self.leaves:
-            for dx in range(-1, 2):
-                for dy in range(-1, 2):
-                    for dz in range(-1, 2):
+            for dx in xrange(-1, 2):
+                for dy in xrange(-1, 2):
+                    for dz in xrange(-1, 2):
                         self.updateBitSet.add(
                             (args["x"] + dx, args["y"] + dy, args["z"] + dz, args["dimension"])
                         )
 
         elif args["fullName"] in self.logs:
-            for dx in range(-4, 5):
-                for dy in range(-4, 5):
-                    for dz in range(-4, 5):
+            for dx in xrange(-4, 5):
+                for dy in xrange(-4, 5):
+                    for dz in xrange(-4, 5):
                         self.updateBitSet.add(
                             (args["x"] + dx, args["y"] + dy, args["z"] + dz, args["dimension"])
                         )
@@ -83,23 +77,43 @@ class LeavesServer(IServer):
         distances = {}
         queue = deque()
 
-        for dx in range(-search_radius, search_radius + 1):
-            for dy in range(-search_radius, search_radius + 1):
-                for dz in range(-search_radius, search_radius + 1):
-                    x, y, z = dx + search_radius, dy + search_radius, dz + search_radius
-                    check_pos = (pos_and_dim[0] + dx, pos_and_dim[1] + dy, pos_and_dim[2] + dz)
-                    neighbor_block = blockInfoComp.GetBlockNew(check_pos, args["dimensionId"])
-                    if neighbor_block is None:
-                        neighbor_block = {"name": "minecraft:air"}
+        bp = compFactory.CreateBlock(levelId)._paletteHelper._getBlockDescriptionsBetweenPos(
+            levelId,
+            args["dimensionId"],
+            (
+                pos_and_dim[0] - search_radius,
+                pos_and_dim[1] - search_radius,
+                pos_and_dim[2] - search_radius,
+            ),
+            (
+                pos_and_dim[0] + search_radius,
+                pos_and_dim[1] + search_radius,
+                pos_and_dim[2] + search_radius,
+            ),
+            False,
+        )
 
-                    key = (x, y, z)
-                    if neighbor_block["name"] in self.logs:
-                        distances[key] = 0
-                        queue.append(key)
-                    elif neighbor_block["name"] in self.leaves:
-                        distances[key] = -2
-                    else:
-                        distances[key] = -1
+        bp_width = bp[3]
+        area = bp[4] * bp_width
+        logs = self.logs
+        leaves = self.leaves
+        mBlockPaletteDescriptionsDict = bp[0]
+
+        block_types = {name: 0 for name in logs}
+        block_types.update({name: -2 for name in leaves})
+
+        for block, index_list in mBlockPaletteDescriptionsDict.items():
+            block_name = block[0]
+            value = block_types.get(block_name, -1)
+            is_log = value == 0
+
+            for index in index_list:
+                y, remainder = divmod(index, area)
+                x, z = divmod(remainder, bp_width)
+                pos = (x, y, z)
+                distances[pos] = value
+                if is_log:
+                    queue.append(pos)
 
         while queue:
             x, y, z = queue.popleft()
@@ -118,6 +132,6 @@ class LeavesServer(IServer):
         center_key = (search_radius, search_radius, search_radius)
         if distances.get(center_key, -1) < 0:
             pos = pos_and_dim[:3]
-            blockInfoComp.SetBlockNew(pos, {"name": "minecraft:air"}, 0, args["dimensionId"], False, True)
-            blockInfoComp.SpawnResources(args["fullName"], pos, 0, 1.0, 0, args["dimensionId"], True)
+            blockInfoComp.SetBlockNew(pos, {"name": "minecraft:air"}, 0, args["dimensionId"], False, False)
+            # blockInfoComp.SpawnResources(args["fullName"], pos, 0, 1.0, 0, args["dimensionId"], True)
         self.updateBitSet.remove(pos_and_dim)
